@@ -140,12 +140,23 @@ class GameNetwork(nn.Module):
     def load(self, filepath):
         """Load network weights from file"""
         if not os.path.exists(filepath):
-            print(f"⚠️  File not found: {filepath}")
+            print(f"ERROR: File not found: {filepath}")
             return False
         
-        self.load_state_dict(torch.load(filepath, map_location=self.get_device()))
-        print(f"✓ Network loaded from {filepath}")
-        return True
+        try:
+            state_dict = torch.load(filepath, map_location=self.get_device())
+            self.load_state_dict(state_dict)
+            print(f"OK: Network loaded successfully from {filepath}")
+            print(f"    Device: {self.get_device()}")
+            
+            # Verify weights are loaded
+            total_params = sum(p.numel() for p in self.parameters())
+            print(f"    Total parameters: {total_params}")
+            
+            return True
+        except Exception as e:
+            print(f"ERROR: Error loading network: {e}")
+            return False
     
     def predict(self, game, legal_moves=None):
         """

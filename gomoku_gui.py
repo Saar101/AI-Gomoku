@@ -100,6 +100,11 @@ class GomokuGUI:
     def start_game(self, vs_ai=False):
         self.game_mode = "pva" if vs_ai else "pvp"
         self.screen_state = "game"
+        
+        # Force 9x9 for AI mode to match trained model
+        if vs_ai:
+            self.selected_size = 9
+        
         self.game = Gomoku(size=self.selected_size)
         self.ai_timer = 0.0
         
@@ -127,20 +132,52 @@ class GomokuGUI:
     def load_ai(self):
         """Load trained network and create AI player"""
         try:
+            print(f"\n{'='*60}")
+            print(f"[AI] Starting AI initialization...")
+            print(f"{'='*60}")
+            
+            # Create network
+            print(f"[1] Creating GameNetwork with board_size={self.selected_size}...")
             network = GameNetwork(board_size=self.selected_size, hidden_size=256)
+            print(f"    OK: Network created")
             
             # Load trained model
             model_dir = "models"
+            print(f"[2] Looking for trained models in '{model_dir}'...")
+            
+            if not os.path.exists(model_dir):
+                print(f"    WARNING: Models directory not found!")
+                self.ai_player = None
+                return
+            
             files = [f for f in os.listdir(model_dir) if "gomoku_trained" in f and f.endswith(".pth")]
+            print(f"    Found {len(files)} model files:")
+            for f in sorted(files):
+                print(f"       - {f}")
+            
             if files:
                 model_path = os.path.join(model_dir, sorted(files)[-1])
+                print(f"\n[3] Loading model: {sorted(files)[-1]}")
                 network.load(model_path)
-                print(f"✓ AI loaded: {sorted(files)[-1]}")
+                print(f"    OK: Model loaded successfully")
+                print(f"    INFO: Network parameters: {sum(p.numel() for p in network.parameters())} total")
+            else:
+                print(f"    ERROR: No trained models found!")
+                self.ai_player = None
+                return
             
+            # Create PUCT player
+            print(f"\n[4] Creating PUCT player (100 simulations, c_puct=1.0)...")
             self.ai_player = PUCTPlayer(network, c_puct=1.0, num_simulations=100)
             self.ai_thinking = False
+            
+            print(f"\n[SUCCESS] AI initialization complete!")
+            print(f"{'='*60}\n")
+            
         except Exception as e:
-            print(f"Error loading AI: {e}")
+            print(f"\n[ERROR] Error loading AI: {e}")
+            import traceback
+            traceback.print_exc()
             self.ai_player = None
     
     def reset_current_game(self):
@@ -616,8 +653,14 @@ class GomokuGUI:
                     if self.game.to_move != self.human_color and not self.animating:
                         self.ai_timer += dt
                         if self.ai_timer >= 0.5:
+                            print(f"\n[AI] AI turn (player {self.game.to_move})...")
+                            print(f"    Legal moves available: {len(self.game.legal_moves())}")
+                            
                             ai_move = self.ai_player.choose_move(self.game, temperature=0.5)
+                            
                             if ai_move:
+                                print(f"    AI chose move: {ai_move}")
+                                
                                 # Start AI animation
                                 self.animating = True
                                 self.anim_row = ai_move[0]
@@ -626,11 +669,15 @@ class GomokuGUI:
                                 self.anim_progress = 0
                                 
                                 self.game.make_move(ai_move)
+                                print(f"    OK: Move executed")
                                 
                                 if self.game.status() is not None:
+                                    print(f"    GAME OVER - Status: {self.game.status()}")
                                     self.winning_line = self.find_winning_line()
                                     self.win_anim_progress = 0
                                     self.show_win_popup = False
+                            else:
+                                print(f"    ERROR: No move returned by AI!")
                             
                             self.ai_timer = 0.0
                 

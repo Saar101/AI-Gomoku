@@ -51,27 +51,41 @@ class PUCTPlayer:
         self._policy_cache = policy_dict
         
         # Run simulations
-        for _ in range(self.num_simulations):
+        simulation_count = 0
+        for sim in range(self.num_simulations):
             # Clone game for simulation
             game_copy = game.clone()
             self._simulate(root, game_copy)
+            simulation_count += 1
+            if (sim + 1) % 20 == 0:
+                print(f"   Simulation {sim + 1}/{self.num_simulations} complete")
+        
+        print(f"   All {simulation_count} simulations complete")
         
         # Select move based on visit counts
+        visit_dist = root.get_visit_distribution()
+        top_moves = dict(sorted([(str(m), v) for m, v in visit_dist.items()], key=lambda x: x[1], reverse=True)[:5])
+        print(f"   Top 5 moves: {top_moves}")
+        
         if temperature == 0:
             # Deterministic: choose most visited
             best_child = root.best_child_visits()
-            return best_child.move if best_child else legal_moves[0]
+            selected_move = best_child.move if best_child else legal_moves[0]
+            print(f"   Selected (deterministic): {selected_move}")
+            return selected_move
         else:
             # Stochastic: sample proportional to visits^(1/T)
-            visit_dist = root.get_visit_distribution()
             if not visit_dist:
+                print(f"   No visit distribution, returning first legal move")
                 return legal_moves[0]
             
             if temperature == 1.0:
                 # Use visit counts directly as probabilities
                 import random
                 moves, probs = zip(*visit_dist.items())
-                return random.choices(moves, weights=probs)[0]
+                selected_move = random.choices(moves, weights=probs)[0]
+                print(f"   Selected (temperature={temperature}): {selected_move}")
+                return selected_move
             else:
                 # Apply temperature
                 import random
@@ -79,7 +93,9 @@ class PUCTPlayer:
                 total = sum(temp_probs.values())
                 temp_probs = {m: p/total for m, p in temp_probs.items()}
                 moves, probs = zip(*temp_probs.items())
-                return random.choices(moves, weights=probs)[0]
+                selected_move = random.choices(moves, weights=probs)[0]
+                print(f"   Selected (temperature={temperature}): {selected_move}")
+                return selected_move
     
     def _simulate(self, node, game):
         """

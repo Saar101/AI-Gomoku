@@ -202,7 +202,7 @@ def generate_self_play_data(num_games=100, board_size=9,
         
         game_time = time.time() - game_start
         
-        # Print progress
+        # Print progress every 10 games
         if verbose and (game_num + 1) % 10 == 0:
             elapsed = time.time() - start_time
             avg_time = elapsed / (game_num + 1)
@@ -210,7 +210,7 @@ def generate_self_play_data(num_games=100, board_size=9,
             
             outcome_str = {1: "P1 Win", -1: "P2 Win", 0: "Draw"}[game_data.outcome]
             
-            print(f"Game {game_num + 1}/{num_games} | "
+            print(f"[PROGRESS] Game {game_num + 1}/{num_games} | "
                   f"{outcome_str} | "
                   f"{len(samples)} positions | "
                   f"{game_time:.1f}s | "
@@ -253,12 +253,31 @@ def load_training_data(filepath):
 
 def main():
     """Generate MCTS self-play data with default settings"""
-    print("\n" + "🎮 MCTS SELF-PLAY DATA GENERATION 🎮".center(60))
+    print("\n" + "[MCTS] SELF-PLAY DATA GENERATION".center(60))
     
     # Generate data using pure MCTS (no network)
     board_size = 9
-    num_games = 50  # Start with 50 for testing, increase to 10,000 for full training
+    num_games = 10000  # Full training data as per Exercise 6 requirements
     mcts_iterations = 400  # MCTS iterations per move (reduced from 800 for speed)
+    
+    # WARNING BEFORE STARTING
+    print("\n" + "="*60)
+    print("[WARNING] This will generate 10,000 self-play games")
+    print("This is REQUIRED for Exercise 6 pre-training")
+    print(f"Estimated time: 3-5 hours on CPU")
+    print("Progress will be shown every 10 games")
+    print("="*60)
+    print("\nWaiting for your confirmation to start...")
+    print("Type 'yes' to begin: ", end="", flush=True)
+    
+    response = input().strip().lower()
+    
+    if response != "yes":
+        print("Cancelled. Exiting.")
+        return
+    
+    print("\n[START] Beginning 10,000 game generation...")
+    print("="*60 + "\n")
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_path = f"training_data/mcts_selfplay_{board_size}x{board_size}_{num_games}games_{timestamp}.pkl"
@@ -273,8 +292,11 @@ def main():
     )
     
     # Show sample statistics
-    print("Sample Statistics:")
-    print(f"  States: {len(samples)} positions")
+    print("\n" + "="*60)
+    print("[COMPLETE] Self-play data generation finished!")
+    print("="*60)
+    print("\nSample Statistics:")
+    print(f"  Total positions: {len(samples)}")
     print(f"  State shape: {len(samples[0][0])} features")
     print(f"  Policy moves: {len(samples[0][1])} (varies by position)")
     print(f"  Value range: [{min(s[2] for s in samples):.1f}, {max(s[2] for s in samples):.1f}]")
@@ -289,6 +311,7 @@ def main():
     print(f"  Wins:   {wins} ({wins/len(outcomes)*100:.1f}%)")
     print(f"  Losses: {losses} ({losses/len(outcomes)*100:.1f}%)")
     print(f"  Draws:  {draws} ({draws/len(outcomes)*100:.1f}%)")
+    print(f"\nData saved to: {save_path}")
 
 
 if __name__ == "__main__":
