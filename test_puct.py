@@ -1,20 +1,41 @@
 """
 Test suite for PUCT (Predictor + UCT) implementation
+Tests PUCT with trained neural network
 """
 
 import time
+import os
 from Gomoku import Gomoku
 from GameNetwork import GameNetwork
 from PUCTPlayer import PUCTPlayer
 
+
+def load_trained_network(board_size=9):
+    """Load the trained network or create a new one"""
+    network = GameNetwork(board_size=board_size, hidden_size=256)
+    
+    # Try to load trained model
+    model_dir = "models"
+    if os.path.exists(model_dir):
+        files = [f for f in os.listdir(model_dir) if f.startswith("gomoku_trained") and f.endswith(".pth")]
+        if files:
+            latest_model = sorted(files)[-1]
+            model_path = os.path.join(model_dir, latest_model)
+            network.load(model_path)
+            print(f"✓ Loaded trained network: {latest_model}")
+            return network
+    
+    print(f"⚠️  No trained network found, using untrained network")
+    return network
+
 def test_basic_functionality():
-    """Test basic PUCT functionality."""
+    """Test basic PUCT functionality with trained network."""
     print("\n" + "="*60)
-    print("TEST 1: Basic PUCT Functionality")
+    print("TEST 1: PUCT with Trained Network")
     print("="*60)
     
     game = Gomoku(size=9)
-    network = GameNetwork(board_size=9, hidden_size=64)
+    network = load_trained_network(board_size=9)
     player = PUCTPlayer(network, c_puct=1.0, num_simulations=100)
     
     print(f"✓ Created PUCT player with 100 simulations")
@@ -42,13 +63,13 @@ def test_basic_functionality():
 
 
 def test_action_probabilities():
-    """Test getting action probabilities."""
+    """Test getting action probabilities with trained network."""
     print("="*60)
-    print("TEST 2: Action Probabilities")
+    print("TEST 2: Action Probabilities (Trained Network)")
     print("="*60)
     
     game = Gomoku(size=9)
-    network = GameNetwork(board_size=9, hidden_size=64)
+    network = load_trained_network(board_size=9)
     player = PUCTPlayer(network, c_puct=1.0, num_simulations=50)
     
     # Make a few moves
@@ -79,13 +100,13 @@ def test_action_probabilities():
 
 
 def test_temperature():
-    """Test temperature effect on move selection."""
+    """Test temperature effect on move selection with trained network."""
     print("="*60)
-    print("TEST 3: Temperature Effect")
+    print("TEST 3: Temperature Effect (Trained Network)")
     print("="*60)
     
     game = Gomoku(size=9)
-    network = GameNetwork(board_size=9, hidden_size=64)
+    network = load_trained_network(board_size=9)
     player = PUCTPlayer(network, c_puct=1.0, num_simulations=50)
     
     # Temperature = 0 (deterministic)
@@ -113,13 +134,13 @@ def test_temperature():
 
 
 def test_winning_detection():
-    """Test that PUCT can detect winning moves."""
+    """Test that PUCT can detect winning moves with trained network."""
     print("="*60)
-    print("TEST 4: Winning Move Detection")
+    print("TEST 4: Winning Move Detection (Trained Network)")
     print("="*60)
     
     game = Gomoku(size=9)
-    network = GameNetwork(board_size=9, hidden_size=128)
+    network = load_trained_network(board_size=9)
     player = PUCTPlayer(network, c_puct=1.0, num_simulations=200)
     
     # Set up a position where player 1 can win
@@ -161,13 +182,13 @@ def test_winning_detection():
 
 
 def test_complete_game():
-    """Test a complete game with PUCT vs PUCT."""
+    """Test a complete game with PUCT vs PUCT using trained network."""
     print("="*60)
-    print("TEST 5: Complete PUCT vs PUCT Game")
+    print("TEST 5: Complete PUCT vs PUCT Game (Trained Network)")
     print("="*60)
     
     game = Gomoku(size=9)
-    network = GameNetwork(board_size=9, hidden_size=64)
+    network = load_trained_network(board_size=9)
     
     player1 = PUCTPlayer(network, c_puct=1.0, num_simulations=50)
     player2 = PUCTPlayer(network, c_puct=1.0, num_simulations=50)
@@ -214,18 +235,18 @@ def test_complete_game():
 
 
 def test_network_integration():
-    """Test that PUCT properly uses network predictions."""
+    """Test that PUCT properly uses trained network predictions."""
     print("="*60)
-    print("TEST 6: Network Integration")
+    print("TEST 6: Trained Network Integration")
     print("="*60)
     
     game = Gomoku(size=9)
-    network = GameNetwork(board_size=9, hidden_size=64)
+    network = load_trained_network(board_size=9)
     
-    # Get raw network prediction
+    # Get network prediction
     value, policy = network.predict(game)
     
-    print(f"✓ Network prediction:")
+    print(f"✓ Network prediction (TRAINED):")
     print(f"  Value: {value:.4f}")
     print(f"  Policy size: {len(policy)} moves")
     
@@ -247,8 +268,8 @@ def test_network_integration():
 
 
 def main():
-    """Run all tests."""
-    print("\n" + "🧪 PUCT TEST SUITE 🧪".center(60))
+    """Run all tests with trained network."""
+    print("\n" + "🧪 PUCT TEST SUITE (WITH TRAINED NETWORK) 🧪".center(60))
     
     try:
         test_basic_functionality()

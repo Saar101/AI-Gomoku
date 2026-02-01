@@ -549,14 +549,6 @@ class GomokuGUI:
                     if 0 <= row < self.game.size and 0 <= col < self.game.size:
                         if self.game.board[row][col] == 0:
                             try:
-                                # Start animation
-                                self.animating = True
-                                self.anim_row = row
-                                self.anim_col = col
-                                self.anim_player = self.game.to_move
-                                self.anim_progress = 0
-                                
-                                # Make the move
                                 self.game.make_move((row, col))
                                 
                                 if self.game.status() is not None:
@@ -564,7 +556,7 @@ class GomokuGUI:
                                     self.win_anim_progress = 0
                                     self.show_win_popup = False
                             except ValueError:
-                                self.animating = False
+                                pass
     
     def run(self):
         clock = pygame.time.Clock()
@@ -618,13 +610,6 @@ class GomokuGUI:
                         if self.ai_timer >= 0.5:
                             ai_move = self.ai_player.choose_move(self.game, temperature=0.5)
                             if ai_move:
-                                # Start AI animation
-                                self.animating = True
-                                self.anim_row = ai_move[0]
-                                self.anim_col = ai_move[1]
-                                self.anim_player = self.game.to_move
-                                self.anim_progress = 0
-                                
                                 self.game.make_move(ai_move)
                                 
                                 if self.game.status() is not None:

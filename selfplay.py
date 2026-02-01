@@ -1,15 +1,17 @@
 """
 Self-Play Data Generation
-Generate training data by having PUCT play against itself
+Generate training data by having MCTS play against itself (without neural network)
+As per Exercise 6 requirements: Use MCTSPlayer to generate self-play games WITHOUT network guidance
 """
 
 import os
 import pickle
 import time
+import random
 from datetime import datetime
 from Gomoku import Gomoku
-from GameNetwork import GameNetwork
-from PUCTPlayer import PUCTPlayer
+from MCTSPlayer import MCTSPlayer
+from MCTSNode import MCTSNode
 
 
 class SelfPlayGame:
@@ -57,42 +59,93 @@ class SelfPlayGame:
         return samples
 
 
-def play_self_play_game(network, board_size=9, num_simulations=100, temperature=1.0):
+def get_mcts_policy(game, mcts_player, iterations=800):
     """
-    Play one self-play game
+    Run MCTS and return visit count distribution as policy
     
     Args:
-        network: GameNetwork instance
+        game: Gomoku game instance
+        mcts_player: MCTSPlayer instance
+        iterations: number of MCTS iterations
+    
+    Returns:
+        dict: move -> probability (based on visit counts)
+    """
+    legal_moves = game.legal_moves()
+    
+    if not legal_moves or game.status() is not None:
+        return {}
+    
+    # Create root node and run MCTS
+    root = MCTSNode(parent=None, move=None, untried_moves=legal_moves)
+    root_player = game.to_move
+    
+    mcts_player._run_mcts(game, root, iterations, root_player)
+    
+    # Get visit counts from children
+    visit_counts = {}
+    for move, child in root.children.items():
+        visit_counts[move] = child.visits
+    
+    # Convert to probabilities
+    total_visits = sum(visit_counts.values())
+    if total_visits == 0:
+        # Shouldn't happen, but fallback to uniform
+        return {move: 1.0 / len(legal_moves) for move in legal_moves}
+    
+    policy = {move: visits / total_visits for move, visits in visit_counts.items()}
+    
+    return policy
+
+
+def play_self_play_game(board_size=9, mcts_iterations=800, temperature=1.0):
+    """
+    Play one self-play game using pure MCTS (no neural network)
+    
+    Args:
         board_size: size of the board
-        num_simulations: MCTS simulations per move
+        mcts_iterations: number of MCTS iterations per move
         temperature: controls randomness (1.0 = stochastic, 0 = deterministic)
     
     Returns:
         SelfPlayGame object containing game data
     """
     game = Gomoku(size=board_size)
-    player = PUCTPlayer(network, c_puct=1.0, num_simulations=num_simulations)
+    player = MCTSPlayer(exploration_c=1.41421356237)
     
     game_data = SelfPlayGame()
     move_count = 0
     max_moves = board_size * board_size
     
     while game.status() is None and move_count < max_moves:
-        # Get action probabilities from MCTS
-        action_probs = player.get_action_probs(game, temperature=temperature)
+        # Get visit count distribution from MCTS
+        policy = get_mcts_policy(game, player, mcts_iterations)
         
-        if not action_probs:
+        if not policy:
             break
         
         # Save current position
         encoded_state = game.encode()
         current_player = game.to_move
-        game_data.add_position(encoded_state, action_probs, current_player)
+        game_data.add_position(encoded_state, policy, current_player)
         
-        # Choose move (stochastic during training)
-        import random
-        moves, probs = zip(*action_probs.items())
-        chosen_move = random.choices(moves, weights=probs)[0]
+        # Choose move based on temperature
+        if temperature == 0:
+            # Deterministic: choose most visited
+            chosen_move = max(policy.items(), key=lambda x: x[1])[0]
+        else:
+            # Stochastic: sample proportional to visits^(1/temperature)
+            if temperature == 1.0:
+                # Use visit counts directly
+                moves, probs = zip(*policy.items())
+                chosen_move = random.choices(moves, weights=probs)[0]
+            else:
+                # Apply temperature
+                temp_policy = {m: (p ** (1.0/temperature)) for m, p in policy.items()}
+                total = sum(temp_policy.values())
+                temp_policy = {m: p/total for m, p in temp_policy.items()}
+                moves, probs = zip(*temp_policy.items())
+                chosen_move = random.choices(moves, weights=probs)[0]
         
         # Apply move
         game.make_move(chosen_move)
@@ -108,17 +161,16 @@ def play_self_play_game(network, board_size=9, num_simulations=100, temperature=
     return game_data
 
 
-def generate_self_play_data(network, num_games=100, board_size=9, 
-                           num_simulations=100, temperature=1.0,
+def generate_self_play_data(num_games=100, board_size=9, 
+                           mcts_iterations=800, temperature=1.0,
                            save_path=None, verbose=True):
     """
-    Generate training data from multiple self-play games
+    Generate training data from multiple MCTS self-play games (WITHOUT neural network)
     
     Args:
-        network: GameNetwork instance
         num_games: number of games to play
         board_size: size of the board
-        num_simulations: MCTS simulations per move
+        mcts_iterations: MCTS iterations per move
         temperature: move selection randomness
         save_path: path to save data (None = don't save)
         verbose: print progress
@@ -130,11 +182,11 @@ def generate_self_play_data(network, num_games=100, board_size=9,
     
     if verbose:
         print(f"\n{'='*60}")
-        print(f"GENERATING SELF-PLAY DATA")
+        print(f"GENERATING MCTS SELF-PLAY DATA (No Network)")
         print(f"{'='*60}")
         print(f"Games: {num_games}")
         print(f"Board: {board_size}x{board_size}")
-        print(f"Simulations: {num_simulations}")
+        print(f"MCTS Iterations: {mcts_iterations}")
         print(f"Temperature: {temperature}")
         print(f"{'='*60}\n")
     
@@ -143,8 +195,8 @@ def generate_self_play_data(network, num_games=100, board_size=9,
     for game_num in range(num_games):
         game_start = time.time()
         
-        # Play one game
-        game_data = play_self_play_game(network, board_size, num_simulations, temperature)
+        # Play one game using pure MCTS
+        game_data = play_self_play_game(board_size, mcts_iterations, temperature)
         samples = game_data.get_training_samples()
         all_samples.extend(samples)
         
@@ -200,23 +252,21 @@ def load_training_data(filepath):
 
 
 def main():
-    """Generate self-play data with default settings"""
-    print("\n" + "🎮 SELF-PLAY DATA GENERATION 🎮".center(60))
+    """Generate MCTS self-play data with default settings"""
+    print("\n" + "🎮 MCTS SELF-PLAY DATA GENERATION 🎮".center(60))
     
-    # Create network
+    # Generate data using pure MCTS (no network)
     board_size = 9
-    network = GameNetwork(board_size=board_size, hidden_size=128)
+    num_games = 50  # Start with 50 for testing, increase to 10,000 for full training
+    mcts_iterations = 400  # MCTS iterations per move (reduced from 800 for speed)
     
-    # Generate data (start with small number for testing)
-    num_games = 50  # Start small, can increase to 10,000
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_path = f"training_data/selfplay_{board_size}x{board_size}_{num_games}games_{timestamp}.pkl"
+    save_path = f"training_data/mcts_selfplay_{board_size}x{board_size}_{num_games}games_{timestamp}.pkl"
     
     samples = generate_self_play_data(
-        network=network,
         num_games=num_games,
         board_size=board_size,
-        num_simulations=100,
+        mcts_iterations=mcts_iterations,
         temperature=1.0,
         save_path=save_path,
         verbose=True
