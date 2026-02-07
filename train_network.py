@@ -5,7 +5,9 @@ Trains value head (predict outcomes) and policy head (predict MCTS visit counts)
 
 import os
 import sys
+import json
 import pickle
+import numpy as np
 import torch
 import torch.nn as nn
 import time
@@ -16,9 +18,42 @@ from GameNetwork import GameNetwork, GameNetworkOptimizer
 
 def load_training_data(filepath):
     """Load self-play training data"""
+    ext = os.path.splitext(filepath)[1].lower()
+
+    if ext == ".npz":
+        data = np.load(filepath, allow_pickle=True)
+        states = data["states"]
+        values = data["values"]
+        policy_moves = data["policy_moves"]
+        policy_probs = data["policy_probs"]
+
+        samples = []
+        for i in range(len(states)):
+            moves_arr = policy_moves[i]
+            probs_arr = policy_probs[i]
+            policy = {}
+            if moves_arr is not None and len(moves_arr) > 0:
+                for move, prob in zip(moves_arr, probs_arr):
+                    row, col = int(move[0]), int(move[1])
+                    policy[(row, col)] = float(prob)
+            samples.append((states[i].tolist(), policy, float(values[i])))
+        return samples
+
+    if ext == ".npy":
+        data = np.load(filepath, allow_pickle=True)
+        return data.tolist()
+
     with open(filepath, 'rb') as f:
         data = pickle.load(f)
     return data
+
+
+def load_training_manifest(manifest_path):
+    """Load manifest and return chunk file list and metadata"""
+    with open(manifest_path, 'r', encoding='utf-8') as f:
+        manifest = json.load(f)
+    chunk_files = manifest.get("chunk_files", [])
+    return chunk_files, manifest
 
 
 def prepare_batch(samples, batch_size):
@@ -64,6 +99,17 @@ def prepare_batch(samples, batch_size):
                 policies_tensor[batch_idx, move_idx] = prob
         
         yield states_tensor, values_tensor, policies_tensor
+
+
+def iter_batches_from_files(file_paths, batch_size):
+    """
+    Stream training batches from a list of pickle files.
+    Loads one file at a time to keep memory usage bounded.
+    """
+    for path in file_paths:
+        samples = load_training_data(path)
+        for batch in prepare_batch(samples, batch_size):
+            yield batch
 
 
 def train_epoch(network, optimizer, data_loader, epoch, total_epochs):
@@ -143,9 +189,24 @@ def train_network(data_path, board_size=9, hidden_size=128,
     # Load data
     if verbose:
         print(f"Loading training data...")
-    
-    samples = load_training_data(data_path)
-    print(f"✓ Loaded {len(samples)} training samples")
+
+    using_manifest = data_path.endswith(".json") and os.path.exists(data_path)
+
+    if using_manifest:
+        chunk_files, manifest = load_training_manifest(data_path)
+        if not chunk_files:
+            raise ValueError("Manifest has no chunk files to train on.")
+        total_samples = manifest.get("total_samples", None)
+        if verbose:
+            total_str = f"{total_samples}" if total_samples is not None else "unknown"
+            print(f"✓ Loaded manifest with {len(chunk_files)} chunk files")
+            print(f"✓ Total samples (manifest): {total_str}")
+            print("Chunk files used for training:")
+            for path in chunk_files:
+                print(f"  - {path}")
+    else:
+        samples = load_training_data(data_path)
+        print(f"✓ Loaded {len(samples)} training samples")
     
     # Create network and optimizer
     network = GameNetwork(board_size=board_size, hidden_size=hidden_size)
@@ -169,7 +230,10 @@ def train_network(data_path, board_size=9, hidden_size=128,
         epoch_start = time.time()
         
         # Create data loader for this epoch
-        data_loader = prepare_batch(samples, batch_size)
+        if using_manifest:
+            data_loader = iter_batches_from_files(chunk_files, batch_size)
+        else:
+            data_loader = prepare_batch(samples, batch_size)
         
         # Train one epoch
         losses = train_epoch(network, optimizer, data_loader, epoch, epochs)
@@ -270,33 +334,69 @@ def evaluate_network(network, samples, board_size=9, num_samples=100):
     }
 
 
+def load_samples_for_evaluation(data_path, num_samples=200):
+    """Load a limited number of samples for evaluation."""
+    using_manifest = data_path.endswith(".json") and os.path.exists(data_path)
+
+    if not using_manifest:
+        samples = load_training_data(data_path)
+        return samples[:min(num_samples, len(samples))]
+
+    chunk_files, _ = load_training_manifest(data_path)
+    collected = []
+
+    for path in chunk_files:
+        samples = load_training_data(path)
+        for sample in samples:
+            collected.append(sample)
+            if len(collected) >= num_samples:
+                return collected
+
+    return collected
+
+
 def main():
     """Train network on MCTS self-play data"""
     print("\n" + "🧠 NEURAL NETWORK TRAINING 🧠".center(60))
     
-    # Find latest self-play data file
+    # Find latest self-play data file or manifest
     data_dir = "training_data"
     if not os.path.exists(data_dir):
         print(f"Error: No training data directory found!")
         return
     
-    files = [f for f in os.listdir(data_dir) if f.startswith("mcts_selfplay") and f.endswith(".pkl")]
-    if not files:
-        print(f"Error: No self-play data files found in {data_dir}!")
-        return
-    
-    latest_file = sorted(files)[-1]
-    data_path = os.path.join(data_dir, latest_file)
-    
-    print(f"Using data: {latest_file}")
-    
-    # Determine board size from filename
-    if "9x9" in latest_file:
-        board_size = 9
-    elif "15x15" in latest_file:
-        board_size = 15
+    manifest_9 = os.path.join(data_dir, "manifest_9x9.json")
+    manifest_15 = os.path.join(data_dir, "manifest_15x15.json")
+
+    if os.path.exists(manifest_9) or os.path.exists(manifest_15):
+        if os.path.exists(manifest_9):
+            data_path = manifest_9
+            board_size = 9
+        else:
+            data_path = manifest_15
+            board_size = 15
+        print(f"Using manifest: {os.path.basename(data_path)}")
     else:
-        board_size = 9  # default
+        files = [
+            f for f in os.listdir(data_dir)
+            if f.startswith("mcts_selfplay") and f.endswith((".pkl", ".npz", ".npy"))
+        ]
+        if not files:
+            print(f"Error: No self-play data files found in {data_dir}!")
+            return
+        
+        latest_file = sorted(files)[-1]
+        data_path = os.path.join(data_dir, latest_file)
+        
+        print(f"Using data: {latest_file}")
+        
+        # Determine board size from filename
+        if "9x9" in latest_file:
+            board_size = 9
+        elif "15x15" in latest_file:
+            board_size = 15
+        else:
+            board_size = 9  # default
     
     # Train
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -316,8 +416,8 @@ def main():
     # Evaluate
     print(f"Evaluating network on test samples...")
     
-    samples = load_training_data(data_path)
-    metrics = evaluate_network(network, samples, board_size=board_size, num_samples=200)
+    eval_samples = load_samples_for_evaluation(data_path, num_samples=200)
+    metrics = evaluate_network(network, eval_samples, board_size=board_size, num_samples=200)
     
     print(f"\nEvaluation Results:")
     print(f"  Value MAE: {metrics['avg_value_error']:.4f}")

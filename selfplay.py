@@ -5,7 +5,9 @@ As per Exercise 6 requirements: Use MCTSPlayer to generate self-play games WITHO
 """
 
 import os
+import json
 import pickle
+import numpy as np
 import time
 import random
 from datetime import datetime
@@ -202,8 +204,8 @@ def generate_self_play_data(num_games=100, board_size=9,
         
         game_time = time.time() - game_start
         
-        # Print progress every 10 games
-        if verbose and (game_num + 1) % 10 == 0:
+        # Print progress every game
+        if verbose:
             elapsed = time.time() - start_time
             avg_time = elapsed / (game_num + 1)
             remaining = avg_time * (num_games - game_num - 1)
@@ -240,13 +242,115 @@ def generate_self_play_data(num_games=100, board_size=9,
 def save_training_data(samples, filepath):
     """Save training samples to file"""
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    
+
+    ext = os.path.splitext(filepath)[1].lower()
+
+    if ext == ".npz":
+        states = np.array([s[0] for s in samples], dtype=np.float32)
+        values = np.array([s[2] for s in samples], dtype=np.float32)
+        policy_moves = []
+        policy_probs = []
+
+        for policy in [s[1] for s in samples]:
+            if policy:
+                moves, probs = zip(*policy.items())
+                policy_moves.append(np.array(moves, dtype=np.int16))
+                policy_probs.append(np.array(probs, dtype=np.float32))
+            else:
+                policy_moves.append(np.empty((0, 2), dtype=np.int16))
+                policy_probs.append(np.empty((0,), dtype=np.float32))
+
+        np.savez_compressed(
+            filepath,
+            states=states,
+            values=values,
+            policy_moves=np.array(policy_moves, dtype=object),
+            policy_probs=np.array(policy_probs, dtype=object)
+        )
+        return
+
+    if ext == ".npy":
+        np.save(filepath, np.array(samples, dtype=object), allow_pickle=True)
+        return
+
     with open(filepath, 'wb') as f:
         pickle.dump(samples, f)
 
 
+def save_training_chunks(samples, board_size, base_dir, timestamp, chunk_size=5000, save_format="pkl", verbose=True):
+    """
+    Save samples into chunk files and update a manifest so future runs
+    can train on all accumulated data.
+    """
+    os.makedirs(base_dir, exist_ok=True)
+    chunk_files = []
+
+    for i in range(0, len(samples), chunk_size):
+        chunk = samples[i:i + chunk_size]
+        chunk_idx = i // chunk_size
+        ext = save_format.lower().lstrip(".")
+        chunk_filename = f"mcts_selfplay_{board_size}x{board_size}_{timestamp}_chunk{chunk_idx:03d}.{ext}"
+        chunk_path = os.path.join(base_dir, chunk_filename)
+        save_training_data(chunk, chunk_path)
+        chunk_files.append(chunk_path)
+
+    manifest_path = os.path.join(base_dir, f"manifest_{board_size}x{board_size}.json")
+    manifest = {
+        "board_size": board_size,
+        "chunk_files": [],
+        "total_samples": 0
+    }
+
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, 'r', encoding='utf-8') as f:
+                manifest = json.load(f)
+        except Exception:
+            if verbose:
+                print("[WARN] Failed to read existing manifest, creating a new one.")
+
+    # Append new chunks
+    manifest["board_size"] = board_size
+    manifest["chunk_files"].extend(chunk_files)
+    manifest["total_samples"] = manifest.get("total_samples", 0) + len(samples)
+
+    with open(manifest_path, 'w', encoding='utf-8') as f:
+        json.dump(manifest, f, indent=2)
+
+    if verbose:
+        print(f"✓ Saved {len(chunk_files)} chunk files")
+        print(f"✓ Updated manifest: {manifest_path}")
+
+    return manifest_path
+
+
 def load_training_data(filepath):
     """Load training samples from file"""
+    ext = os.path.splitext(filepath)[1].lower()
+
+    if ext == ".npz":
+        data = np.load(filepath, allow_pickle=True)
+        states = data["states"]
+        values = data["values"]
+        policy_moves = data["policy_moves"]
+        policy_probs = data["policy_probs"]
+
+        samples = []
+        for i in range(len(states)):
+            moves_arr = policy_moves[i]
+            probs_arr = policy_probs[i]
+            policy = {}
+            if moves_arr is not None and len(moves_arr) > 0:
+                for move, prob in zip(moves_arr, probs_arr):
+                    row, col = int(move[0]), int(move[1])
+                    policy[(row, col)] = float(prob)
+            samples.append((states[i].tolist(), policy, float(values[i])))
+        return samples
+
+    if ext == ".npy":
+        data = np.load(filepath, allow_pickle=True)
+        return data.tolist()
+
     with open(filepath, 'rb') as f:
         return pickle.load(f)
 
@@ -257,14 +361,14 @@ def main():
     
     # Generate data using pure MCTS (no network)
     board_size = 9
-    num_games = 10000  # Full training data as per Exercise 6 requirements
-    mcts_iterations = 400  # MCTS iterations per move (reduced from 800 for speed)
+    num_games = 100  # Reduced for faster iteration
+    mcts_iterations = 10000  # MCTS iterations per move (increased for strength)
     
     # WARNING BEFORE STARTING
     print("\n" + "="*60)
-    print("[WARNING] This will generate 10,000 self-play games")
-    print("This is REQUIRED for Exercise 6 pre-training")
-    print(f"Estimated time: 3-5 hours on CPU")
+    print("[WARNING] This will generate 100 self-play games")
+    print("Data will be appended to the existing training set")
+    print(f"Estimated time: depends on CPU speed")
     print("Progress will be shown every 10 games")
     print("="*60)
     print("\nWaiting for your confirmation to start...")
@@ -276,11 +380,12 @@ def main():
         print("Cancelled. Exiting.")
         return
     
-    print("\n[START] Beginning 10,000 game generation...")
+    print("\n[START] Beginning 100 game generation...")
     print("="*60 + "\n")
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_path = f"training_data/mcts_selfplay_{board_size}x{board_size}_{num_games}games_{timestamp}.pkl"
+    save_format = "npz"
+    save_path = f"training_data/mcts_selfplay_{board_size}x{board_size}_{num_games}games_{timestamp}.{save_format}"
     
     samples = generate_self_play_data(
         num_games=num_games,
@@ -288,6 +393,17 @@ def main():
         mcts_iterations=mcts_iterations,
         temperature=1.0,
         save_path=save_path,
+        verbose=True
+    )
+
+    # Save chunks and update manifest for accumulated training
+    manifest_path = save_training_chunks(
+        samples=samples,
+        board_size=board_size,
+        base_dir="training_data",
+        timestamp=timestamp,
+        chunk_size=5000,
+        save_format=save_format,
         verbose=True
     )
     
@@ -312,6 +428,7 @@ def main():
     print(f"  Losses: {losses} ({losses/len(outcomes)*100:.1f}%)")
     print(f"  Draws:  {draws} ({draws/len(outcomes)*100:.1f}%)")
     print(f"\nData saved to: {save_path}")
+    print(f"Training manifest updated: {manifest_path}")
 
 
 if __name__ == "__main__":

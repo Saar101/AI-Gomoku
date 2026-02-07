@@ -156,11 +156,13 @@ class GomokuGUI:
                 print(f"       - {f}")
             
             if files:
-                model_path = os.path.join(model_dir, sorted(files)[-1])
-                print(f"\n[3] Loading model: {sorted(files)[-1]}")
+                model_filename = sorted(files)[-1]
+                model_path = os.path.join(model_dir, model_filename)
+                print(f"\n[3] Loading model: {model_filename}")
                 network.load(model_path)
                 print(f"    OK: Model loaded successfully")
                 print(f"    INFO: Network parameters: {sum(p.numel() for p in network.parameters())} total")
+                print(f"    INFO: Model file in use: {model_path}")
             else:
                 print(f"    ERROR: No trained models found!")
                 self.ai_player = None
