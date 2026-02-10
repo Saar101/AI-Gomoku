@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import time
+import random
 from datetime import datetime
 from Gomoku import Gomoku
 from GameNetwork import GameNetwork, GameNetworkOptimizer
@@ -198,9 +199,15 @@ def train_network(data_path, board_size=9, hidden_size=128,
             raise ValueError("Manifest has no chunk files to train on.")
         total_samples = manifest.get("total_samples", None)
         if verbose:
+            counts_by_ext = {}
+            for path in chunk_files:
+                ext = os.path.splitext(path)[1].lower()
+                counts_by_ext[ext] = counts_by_ext.get(ext, 0) + 1
+            ext_summary = ", ".join(f"{ext}:{count}" for ext, count in sorted(counts_by_ext.items()))
             total_str = f"{total_samples}" if total_samples is not None else "unknown"
             print(f"✓ Loaded manifest with {len(chunk_files)} chunk files")
             print(f"✓ Total samples (manifest): {total_str}")
+            print(f"✓ File types: {ext_summary}")
             print("Chunk files used for training:")
             for path in chunk_files:
                 print(f"  - {path}")
@@ -231,8 +238,11 @@ def train_network(data_path, board_size=9, hidden_size=128,
         
         # Create data loader for this epoch
         if using_manifest:
-            data_loader = iter_batches_from_files(chunk_files, batch_size)
+            epoch_files = list(chunk_files)
+            random.shuffle(epoch_files)
+            data_loader = iter_batches_from_files(epoch_files, batch_size)
         else:
+            random.shuffle(samples)
             data_loader = prepare_batch(samples, batch_size)
         
         # Train one epoch
@@ -307,6 +317,14 @@ def evaluate_network(network, samples, board_size=9, num_samples=100):
     # Compare with ground truth
     true_values = [s[2] for s in test_samples]
     true_policies = [s[1] for s in test_samples]
+
+    state_len = len(test_samples[0][0])
+    if state_len == 163:
+        num_moves = 81
+    elif state_len == 451:
+        num_moves = 225
+    else:
+        raise ValueError(f"Unknown board size for state length {state_len}")
     
     # Value accuracy
     value_errors = [abs(predicted_values[i] - true_values[i]) 
@@ -320,9 +338,22 @@ def evaluate_network(network, samples, board_size=9, num_samples=100):
             true_top_move = max(true_policy.items(), key=lambda x: x[1])[0]
             row, col = true_top_move
             true_top_idx = row * board_size + col
-            
-            pred_top_idx = predicted_policies[i].argmax()
-            
+
+            state = test_samples[i][0]
+            current_plane = state[:num_moves]
+            opponent_plane = state[num_moves:num_moves * 2]
+            legal_mask = [
+                (current_plane[idx] == 0 and opponent_plane[idx] == 0)
+                for idx in range(num_moves)
+            ]
+
+            masked_logits = predicted_policies[i].copy()
+            for idx, is_legal in enumerate(legal_mask):
+                if not is_legal:
+                    masked_logits[idx] = -1.0e9
+
+            pred_top_idx = masked_logits.argmax()
+
             if pred_top_idx == true_top_idx:
                 policy_correct += 1
     
@@ -406,7 +437,7 @@ def main():
         data_path=data_path,
         board_size=board_size,
         hidden_size=256,
-        epochs=20,
+        epochs=10,
         batch_size=32,
         learning_rate=0.001,
         save_path=save_path,

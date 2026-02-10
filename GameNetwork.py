@@ -243,8 +243,9 @@ class GameNetworkOptimizer:
         # Value loss (MSE)
         value_loss = F.mse_loss(values.squeeze(), target_values)
         
-        # Policy loss (cross entropy)
-        policy_loss = F.cross_entropy(policy_logits, target_policies)
+        # Policy loss (soft-target cross entropy)
+        log_probs = F.log_softmax(policy_logits, dim=1)
+        policy_loss = -(target_policies * log_probs).sum(dim=1).mean()
         
         # Combined loss
         total_loss = value_loss + policy_loss
