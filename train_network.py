@@ -437,7 +437,7 @@ def main():
         data_path=data_path,
         board_size=board_size,
         hidden_size=256,
-        epochs=10,
+        epochs=40,
         batch_size=32,
         learning_rate=0.001,
         save_path=save_path,

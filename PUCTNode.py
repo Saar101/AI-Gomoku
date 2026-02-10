@@ -68,19 +68,19 @@ class PUCTNode:
         Returns:
             PUCT score (higher is better)
         """
-        if self.N == 0:
-            # Unvisited nodes have infinite exploration value
-            return float('inf')
-        
         if self.parent is None:
             return self.Q
-        
+
         # Exploitation term: Q(s,a) - average value
         exploit = self.Q
-        
+
+        parent_visits = max(1, self.parent.N)
+        if self.N == 0:
+            return c_puct * self.prior_prob * math.sqrt(parent_visits)
+
         # Exploration term: c_puct * P(s,a) * sqrt(N_parent) / (1 + N_child)
-        explore = c_puct * self.prior_prob * math.sqrt(self.parent.N) / (1 + self.N)
-        
+        explore = c_puct * self.prior_prob * math.sqrt(parent_visits) / (1 + self.N)
+
         return exploit + explore
     
     def best_child_puct(self, c_puct=1.0):

@@ -3,6 +3,7 @@ PUCTPlayer - MCTS with Neural Network Guidance
 Uses PUCT (Predictor + UCT) algorithm instead of random rollouts
 """
 
+import random
 from PUCTNode import PUCTNode
 
 class PUCTPlayer:
@@ -42,13 +43,18 @@ class PUCTPlayer:
         
         # Create root node
         root = PUCTNode()
-        
+
         # Get initial policy from network
         value, policy_dict = self.network.predict(game, legal_moves)
-        root.untried_moves = list(policy_dict.keys())
-        
+
         # Store policy for expansion
         self._policy_cache = policy_dict
+
+        # Debug: show top policy moves from the network
+        if policy_dict:
+            top_policy = sorted(policy_dict.items(), key=lambda x: x[1], reverse=True)[:5]
+            top_policy_fmt = {str(move): round(prob, 4) for move, prob in top_policy}
+            print(f"   Top 5 policy moves (network): {top_policy_fmt}")
         
         # Run simulations
         simulation_count = 0
@@ -81,14 +87,12 @@ class PUCTPlayer:
             
             if temperature == 1.0:
                 # Use visit counts directly as probabilities
-                import random
                 moves, probs = zip(*visit_dist.items())
                 selected_move = random.choices(moves, weights=probs)[0]
                 print(f"   Selected (temperature={temperature}): {selected_move}")
                 return selected_move
             else:
                 # Apply temperature
-                import random
                 temp_probs = {m: (p ** (1.0/temperature)) for m, p in visit_dist.items()}
                 total = sum(temp_probs.values())
                 temp_probs = {m: p/total for m, p in temp_probs.items()}
@@ -136,33 +140,23 @@ class PUCTPlayer:
                 # If current player won, value = +1, else -1
                 value = 1.0 if status == game.to_move else -1.0
         else:
-            # 2. EXPANSION: add one child if possible
-            if not current.is_fully_expanded():
-                # Get legal moves and policy
+            # 2. EXPANSION: add all children with priors if needed
+            if not current.children:
                 legal_moves = game.legal_moves()
                 value, policy_dict = self.network.predict(game, legal_moves)
-                
-                # Set untried moves with their prior probabilities
-                current.untried_moves = list(policy_dict.keys())
+
                 current._policy_dict = policy_dict
-                
-                # Expand first untried move
-                if current.untried_moves:
-                    move = current.untried_moves.pop(0)
-                    prior_prob = policy_dict[move]
-                    
-                    child = current.add_child(move, prior_prob)
+                for move, prior_prob in policy_dict.items():
+                    current.add_child(move, prior_prob)
+
+                # Select one child to evaluate
+                child = current.best_child_puct(self.c_puct)
+                if child is not None:
                     path.append(child)
-                    
-                    # Apply move
-                    game.make_move(move)
-                    
+                    game.make_move(child.move)
+
                     # 3. EVALUATION: use neural network
                     value, _ = self.network.predict(game)
-                    
-                    # Value is from game.to_move perspective
-                    # We need it from the child's perspective (who just moved)
-                    # After the move, it's opponent's turn, so flip value
                     value = -value
             else:
                 # Already expanded, use network evaluation
@@ -208,7 +202,6 @@ class PUCTPlayer:
         # Create root and run simulations
         root = PUCTNode()
         value, policy_dict = self.network.predict(game, legal_moves)
-        root.untried_moves = list(policy_dict.keys())
         self._policy_cache = policy_dict
         
         for _ in range(self.num_simulations):
@@ -229,3 +222,20 @@ class PUCTPlayer:
             temp_probs = {m: (p ** (1.0/temperature)) for m, p in visit_dist.items()}
             total = sum(temp_probs.values())
             return {m: p/total for m, p in temp_probs.items()}
+
+    def _select_untried_move(self, node):
+        """Select an untried move with prior-weighted sampling."""
+        if not node.untried_moves:
+            return None
+
+        policy = getattr(node, "_policy_dict", {})
+        moves = list(node.untried_moves)
+        weights = [policy.get(m, 0.0) for m in moves]
+
+        if sum(weights) == 0:
+            move = random.choice(moves)
+        else:
+            move = random.choices(moves, weights=weights)[0]
+
+        node.untried_moves.remove(move)
+        return move

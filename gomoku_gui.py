@@ -169,8 +169,8 @@ class GomokuGUI:
                 return
             
             # Create PUCT player
-            print(f"\n[4] Creating PUCT player (100 simulations, c_puct=1.0)...")
-            self.ai_player = PUCTPlayer(network, c_puct=1.0, num_simulations=100)
+            print(f"\n[4] Creating PUCT player (400 simulations, c_puct=1.0)...")
+            self.ai_player = PUCTPlayer(network, c_puct=1.0, num_simulations=400)
             self.ai_thinking = False
             
             print(f"\n[SUCCESS] AI initialization complete!")
@@ -658,7 +658,7 @@ class GomokuGUI:
                             print(f"\n[AI] AI turn (player {self.game.to_move})...")
                             print(f"    Legal moves available: {len(self.game.legal_moves())}")
                             
-                            ai_move = self.ai_player.choose_move(self.game, temperature=0.5)
+                            ai_move = self.ai_player.choose_move(self.game, temperature=0)
                             
                             if ai_move:
                                 print(f"    AI chose move: {ai_move}")
