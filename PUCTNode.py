@@ -20,15 +20,10 @@ class PUCTNode:
         self.prior_prob = prior_prob  # P(s,a) from neural network
         
         self.children = {}  # dict: move -> PUCTNode
-        self.untried_moves = []  # moves not yet expanded
         
         self.N = 0  # visit count
         self.W = 0.0  # total action value
         self.Q = 0.0  # mean action value (W/N)
-    
-    def is_fully_expanded(self):
-        """Check if all legal moves have been tried"""
-        return len(self.untried_moves) == 0
     
     def add_child(self, move, prior_prob):
         """

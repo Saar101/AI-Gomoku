@@ -51,6 +51,7 @@ class PUCTPlayer:
         self._policy_cache = policy_dict
 
         # Debug: show top policy moves from the network
+        print(f"PUCTPlayer: Initial value={value:.4f}")
         if policy_dict:
             top_policy = sorted(policy_dict.items(), key=lambda x: x[1], reverse=True)[:5]
             top_policy_fmt = {str(move): round(prob, 4) for move, prob in top_policy}
@@ -119,7 +120,7 @@ class PUCTPlayer:
         path = [node]
         current = node
         
-        while current.is_fully_expanded() and current.children:
+        while current.children:
             # Select best child according to PUCT
             current = current.best_child_puct(self.c_puct)
             path.append(current)
@@ -137,33 +138,20 @@ class PUCTPlayer:
                 value = 0.0  # Draw
             else:
                 # status is winner (1 or -1)
-                # If current player won, value = +1, else -1
-                value = 1.0 if status == game.to_move else -1.0
+                # In Gomoku, the player who just moved is the winner
+                value = 1.0 
         else:
             # 2. EXPANSION: add all children with priors if needed
-            if not current.children:
-                legal_moves = game.legal_moves()
-                value, policy_dict = self.network.predict(game, legal_moves)
 
-                current._policy_dict = policy_dict
-                for move, prior_prob in policy_dict.items():
-                    current.add_child(move, prior_prob)
+            legal_moves = game.legal_moves()
+            value, policy_dict = self.network.predict(game, legal_moves)
 
-                # Select one child to evaluate
-                child = current.best_child_puct(self.c_puct)
-                if child is not None:
-                    path.append(child)
-                    game.make_move(child.move)
+            current._policy_dict = policy_dict
+            for move, prior_prob in policy_dict.items():
+                current.add_child(move, prior_prob)
 
-                    # 3. EVALUATION: use neural network
-                    value, _ = self.network.predict(game)
-                    value = -value
-            else:
-                # Already expanded, use network evaluation
-                value, _ = self.network.predict(game)
-                # Value is from current player's perspective
-        
-        # 4. BACKPROPAGATION: update all nodes in path
+
+        # 3. BACKPROPAGATION: update all nodes in path
         self._backpropagate(path, value)
     
     def _backpropagate(self, path, value):
