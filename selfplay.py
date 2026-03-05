@@ -43,21 +43,15 @@ class SelfPlayGame:
             List of (state, policy, value) tuples where:
             - state: encoded board state
             - policy: dict of move -> probability
-            - value: outcome from that player's perspective
+            - value: absolute outcome (+1 black win, 0 draw, -1 white win)
         """
         samples = []
-        
-        for state, policy, player in zip(self.states, self.policies, self.current_player):
-            # Value is outcome from this player's perspective
-            if self.outcome == 0:
-                value = 0.0  # Draw
-            elif self.outcome == player:
-                value = 1.0  # This player won
-            else:
-                value = -1.0  # This player lost
-            
+
+        value = float(self.outcome) if self.outcome is not None else 0.0
+
+        for state, policy, _player in zip(self.states, self.policies, self.current_player):
             samples.append((state, policy, value))
-        
+
         return samples
 
 
@@ -116,10 +110,8 @@ def play_self_play_game(board_size=9, mcts_iterations=800, temperature=1.0):
     player = MCTSPlayer(exploration_c=1.41421356237)
     
     game_data = SelfPlayGame()
-    move_count = 0
-    max_moves = board_size * board_size
     
-    while game.status() is None and move_count < max_moves:
+    while game.status() is None:
         # Get visit count distribution from MCTS
         policy = get_mcts_policy(game, player, mcts_iterations)
         
@@ -151,7 +143,6 @@ def play_self_play_game(board_size=9, mcts_iterations=800, temperature=1.0):
         
         # Apply move
         game.make_move(chosen_move)
-        move_count += 1
     
     # Set final outcome
     outcome = game.status()

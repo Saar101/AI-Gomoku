@@ -12,8 +12,13 @@ import os
 class GameNetwork(nn.Module):
     """
     Neural network for Gomoku that outputs:
-    - Value head: probability that current player wins (-1 to +1)
+    - Value head: absolute game value (+1 black win, 0 draw, -1 white win)
     - Policy head: probability distribution over all 225 possible moves
+
+    Input encoding uses 3 flattened planes:
+    - black stones plane
+    - white stones plane
+    - side-to-move plane
     """
     
     def __init__(self, board_size=15, hidden_size=256):
@@ -21,9 +26,8 @@ class GameNetwork(nn.Module):
         self.board_size = board_size
         self.num_moves = board_size * board_size
         
-        # Input size: 2 planes (black, white) + 1 (turn) = 3 channels flattened
-        # Actually from Gomoku.encode(): 2 planes of board_size*board_size + 1 turn bit
-        input_size = board_size * board_size * 2 + 1
+        # Input size: 3 flattened board planes (black, white, turn)
+        input_size = board_size * board_size * 3
         
         # Shared layers - process the board representation
         self.shared = nn.Sequential(
@@ -37,7 +41,7 @@ class GameNetwork(nn.Module):
             nn.ReLU(),
         )
         
-        # Value head - predicts win probability (-1 to +1)
+        # Value head - predicts absolute value in [-1, 1]
         self.value_head = nn.Sequential(
             nn.Linear(hidden_size, 128),
             nn.ReLU(),
@@ -167,7 +171,7 @@ class GameNetwork(nn.Module):
             legal_moves: list of legal moves (will use game.legal_moves() if None)
         
         Returns:
-            value: float in [-1, 1] (win probability from current player perspective)
+            value: float in [-1, 1] as absolute value (+black, -white)
             policy_dict: dict mapping moves to probabilities
         """
         self.eval()  # Set to evaluation mode (disables dropout)

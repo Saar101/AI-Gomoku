@@ -98,12 +98,13 @@ def test_winning_detection():
     
     game = Gomoku(size=5)
     
-    # Place 4 stones in a row for player 1, leaving one open
-    moves = [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2), (0, 3)]
+    # Place 4 stones in a row for player 1, leaving one open,
+    # and ensure it is player 1's turn.
+    moves = [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2), (1, 2), (0, 3), (2, 2)]
     for move in moves:
         game.make_move(move)
     
-    print(f"\nPlaced 7 moves, player 1 has 4-in-a-row with one open end")
+    print(f"\nPlaced 8 moves, player 1 has 4-in-a-row with one open end")
     print(f"Current player: {'Player 1 (Black)' if game.to_move == 1 else 'Player 2 (White)'}")
     print(f"Game status: {game.status()}")
     

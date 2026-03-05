@@ -122,7 +122,7 @@ class PUCTPlayer:
         
         while current.children:
             # Select best child according to PUCT
-            current = current.best_child_puct(self.c_puct)
+            current = current.best_child_puct(self.c_puct, game.to_move)
             path.append(current)
             
             # Apply move to game
@@ -132,14 +132,8 @@ class PUCTPlayer:
         status = game.status()
         
         if status is not None:
-            # Terminal node: use actual game result
-            # Convert result to current player's perspective
-            if status == 0:
-                value = 0.0  # Draw
-            else:
-                # status is winner (1 or -1)
-                # In Gomoku, the player who just moved is the winner
-                value = 1.0 
+            # Terminal node: absolute scoring (black=+1, white=-1, draw=0)
+            value = float(status)
         else:
             # 2. EXPANSION: add all children with priors if needed
 
@@ -160,14 +154,11 @@ class PUCTPlayer:
         
         Args:
             path: list of nodes from root to leaf
-            value: value from leaf node's perspective
+            value: absolute value (+1 black, 0 draw, -1 white)
         """
-        # Value is from the last node's perspective
-        # As we go up, alternate perspectives
         for i in range(len(path) - 1, -1, -1):
             node = path[i]
             node.update(value)
-            value = -value  # Flip perspective for parent
     
     def get_action_probs(self, game, temperature=1.0):
         """

@@ -45,13 +45,13 @@ class PUCTNode:
         Update node statistics after a simulation
         
         Args:
-            value: result from current node's perspective (+1 win, 0 draw, -1 loss)
+            value: absolute result value (+1 black win, 0 draw, -1 white win)
         """
         self.N += 1
         self.W += value
         self.Q = self.W / self.N
     
-    def puct_score(self, c_puct=1.0):
+    def puct_score(self, c_puct=1.0, player_to_move=1):
         """
         Calculate PUCT score for this node (called from parent)
         
@@ -66,8 +66,9 @@ class PUCTNode:
         if self.parent is None:
             return self.Q
 
-        # Exploitation term: Q(s,a) - average value
-        exploit = self.Q
+        # Exploitation term in absolute scoring.
+        # Black (player_to_move=1) maximizes Q, white minimizes Q.
+        exploit = self.Q if player_to_move == 1 else -self.Q
 
         parent_visits = max(1, self.parent.N)
         if self.N == 0:
@@ -78,7 +79,7 @@ class PUCTNode:
 
         return exploit + explore
     
-    def best_child_puct(self, c_puct=1.0):
+    def best_child_puct(self, c_puct=1.0, player_to_move=1):
         """
         Select child with highest PUCT score
         
@@ -91,7 +92,7 @@ class PUCTNode:
         if not self.children:
             return None
         
-        return max(self.children.values(), key=lambda child: child.puct_score(c_puct))
+        return max(self.children.values(), key=lambda child: child.puct_score(c_puct, player_to_move))
     
     def best_child_visits(self):
         """

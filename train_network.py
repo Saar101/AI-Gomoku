@@ -17,6 +17,19 @@ from Gomoku import Gomoku
 from GameNetwork import GameNetwork, GameNetworkOptimizer
 
 
+def infer_board_size_from_state_len(state_len):
+    """Infer board size from 3-plane flattened encoding length."""
+    if state_len <= 0 or state_len % 3 != 0:
+        raise ValueError(f"Invalid encoded state length {state_len}; expected multiple of 3")
+
+    num_moves = state_len // 3
+    board_size = int(num_moves ** 0.5)
+    if board_size * board_size != num_moves:
+        raise ValueError(f"Cannot infer board size from encoded state length {state_len}")
+
+    return board_size, num_moves
+
+
 def load_training_data(filepath):
     """Load self-play training data"""
     ext = os.path.splitext(filepath)[1].lower()
@@ -80,22 +93,16 @@ def prepare_batch(samples, batch_size):
         states_tensor = torch.tensor(states, dtype=torch.float32)
         values_tensor = torch.tensor(values, dtype=torch.float32)
         
-        # Convert policies to tensor (one-hot over 225 moves for 15x15, 81 for 9x9)
-        # Get board size from state length
+        # Convert policies to tensor (one-hot over board moves)
+        # Get board size from encoded state length
         state_len = len(states[0])
-        if state_len == 163:  # 9x9 board
-            num_moves = 81
-        elif state_len == 451:  # 15x15 board
-            num_moves = 225
-        else:
-            raise ValueError(f"Unknown board size for state length {state_len}")
+        board_size, num_moves = infer_board_size_from_state_len(state_len)
         
         policies_tensor = torch.zeros((len(batch), num_moves), dtype=torch.float32)
         
         for batch_idx, policy_dict in enumerate(policies):
             for move, prob in policy_dict.items():
                 row, col = move
-                board_size = int(num_moves ** 0.5)
                 move_idx = row * board_size + col
                 policies_tensor[batch_idx, move_idx] = prob
         
@@ -319,12 +326,7 @@ def evaluate_network(network, samples, board_size=9, num_samples=100):
     true_policies = [s[1] for s in test_samples]
 
     state_len = len(test_samples[0][0])
-    if state_len == 163:
-        num_moves = 81
-    elif state_len == 451:
-        num_moves = 225
-    else:
-        raise ValueError(f"Unknown board size for state length {state_len}")
+    board_size_in_data, num_moves = infer_board_size_from_state_len(state_len)
     
     # Value accuracy
     value_errors = [abs(predicted_values[i] - true_values[i]) 
@@ -340,10 +342,10 @@ def evaluate_network(network, samples, board_size=9, num_samples=100):
             true_top_idx = row * board_size + col
 
             state = test_samples[i][0]
-            current_plane = state[:num_moves]
-            opponent_plane = state[num_moves:num_moves * 2]
+            black_plane = state[:num_moves]
+            white_plane = state[num_moves:num_moves * 2]
             legal_mask = [
-                (current_plane[idx] == 0 and opponent_plane[idx] == 0)
+                (black_plane[idx] == 0 and white_plane[idx] == 0)
                 for idx in range(num_moves)
             ]
 
