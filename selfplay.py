@@ -340,12 +340,7 @@ def main():
     print(f"MCTS iterations per move: {mcts_iterations}")
     print("Temperature default is 0.0 (deterministic strongest).")
     print("=" * 60)
-    print("\nType 'yes' to begin: ", end="", flush=True)
-
-    response = input().strip().lower()
-    if response != "yes":
-        print("Cancelled. Exiting.")
-        return
+    print("\nStarting immediately...")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     save_format = "npz"
