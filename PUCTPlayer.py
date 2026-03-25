@@ -72,7 +72,9 @@ class PUCTPlayer:
         # Select move based on visit counts
         visit_dist = root.get_visit_distribution()
         top_moves = dict(sorted([(str(m), v) for m, v in visit_dist.items()], key=lambda x: x[1], reverse=True)[:5])
+        top_q_moves = dict(sorted([(str(child.move), -child.Q) for child in root.children.values()], key=lambda x: x[1], reverse=True)[:5])
         print(f"   Top 5 moves: {top_moves}")
+        print(f"   Top 5 Q-values: {top_q_moves}")
         
         if temperature == 0:
             # Deterministic: choose most visited
