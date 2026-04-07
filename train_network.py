@@ -18,7 +18,7 @@ from GameNetwork import GameNetwork, GameNetworkOptimizer
 
 
 def infer_board_size_from_state_len(state_len):
-    """Infer board size from 3-plane flattened encoding length."""
+    """Infer board size from legacy 3-plane flattened encoding length."""
     if state_len <= 0 or state_len % 3 != 0:
         raise ValueError(f"Invalid encoded state length {state_len}; expected multiple of 3")
 
@@ -28,6 +28,116 @@ def infer_board_size_from_state_len(state_len):
         raise ValueError(f"Cannot infer board size from encoded state length {state_len}")
 
     return board_size, num_moves
+
+
+def infer_board_info_from_state(state):
+    """Infer board info from CNN/matrix/legacy state encodings."""
+    if isinstance(state, np.ndarray):
+        state = state.tolist()
+
+    if (
+        isinstance(state, list)
+        and len(state) == 3
+        and all(isinstance(ch, list) and ch and isinstance(ch[0], list) for ch in state)
+    ):
+        board_size = len(state[0])
+        if any(len(row) != board_size for ch in state for row in ch):
+            raise ValueError("Invalid CNN state: expected shape (3, N, N)")
+        return board_size, board_size * board_size, "cnn_planes"
+
+    if isinstance(state, list) and state and isinstance(state[0], list):
+        board_size = len(state)
+        if any(len(row) != board_size for row in state):
+            raise ValueError("Invalid matrix state: expected square NxN")
+        return board_size, board_size * board_size, "matrix"
+
+    state_len = len(state)
+    board_size, num_moves = infer_board_size_from_state_len(state_len)
+    return board_size, num_moves, "legacy_flat"
+
+
+def _state_to_cnn_planes(state, board_size=None):
+    """Convert supported state formats into numpy array with shape (3, N, N)."""
+    if isinstance(state, np.ndarray):
+        arr = state.astype(np.float32)
+    else:
+        arr = np.array(state, dtype=np.float32)
+
+    if arr.ndim == 3 and arr.shape[0] == 3:
+        return arr
+
+    if arr.ndim == 2:
+        black = (arr > 0).astype(np.float32)
+        white = (arr < 0).astype(np.float32)
+        turn = np.ones_like(black, dtype=np.float32)
+        return np.stack([black, white, turn], axis=0)
+
+    if arr.ndim == 1:
+        if board_size is None:
+            board_size, _, _ = infer_board_info_from_state(arr.tolist())
+        num_moves = board_size * board_size
+        if arr.shape[0] != num_moves * 3:
+            raise ValueError(f"Unexpected flattened state length {arr.shape[0]}")
+        black = arr[:num_moves].reshape(board_size, board_size)
+        white = arr[num_moves:num_moves * 2].reshape(board_size, board_size)
+        turn = arr[num_moves * 2:].reshape(board_size, board_size)
+        return np.stack([black, white, turn], axis=0)
+
+    raise ValueError(f"Unsupported state shape {arr.shape}")
+
+
+def _transform_move(move, board_size, transform_idx):
+    """Apply one of 8 D4 transforms to a move coordinate."""
+    r, c = move
+
+    # Reflection across vertical axis first for transforms 4..7.
+    if transform_idx >= 4:
+        c = board_size - 1 - c
+        rot = transform_idx - 4
+    else:
+        rot = transform_idx
+
+    for _ in range(rot):
+        r, c = c, board_size - 1 - r
+
+    return int(r), int(c)
+
+
+def augment_state_and_policy(state, policy_dict):
+    """Create 8 symmetry-augmented (state, policy) pairs."""
+    board_size, _, _ = infer_board_info_from_state(state)
+    planes = _state_to_cnn_planes(state, board_size=board_size)
+
+    augmented = []
+    for transform_idx in range(8):
+        augmented_planes = planes.copy()
+
+        if transform_idx >= 4:
+            augmented_planes = np.flip(augmented_planes, axis=2)
+            rot = transform_idx - 4
+        else:
+            rot = transform_idx
+
+        if rot:
+            augmented_planes = np.rot90(augmented_planes, k=rot, axes=(1, 2))
+
+        augmented_policy = {}
+        for move, prob in policy_dict.items():
+            augmented_move = _transform_move(move, board_size, transform_idx)
+            augmented_policy[augmented_move] = float(prob)
+
+        augmented.append((augmented_planes.tolist(), augmented_policy))
+
+    return augmented
+
+
+def augment_samples(samples):
+    """Expand dataset by 8x using board symmetries."""
+    augmented = []
+    for state, policy, value in samples:
+        for aug_state, aug_policy in augment_state_and_policy(state, policy):
+            augmented.append((aug_state, aug_policy, value))
+    return augmented
 
 
 def load_training_data(filepath):
@@ -94,9 +204,7 @@ def prepare_batch(samples, batch_size):
         values_tensor = torch.tensor(values, dtype=torch.float32)
         
         # Convert policies to tensor (one-hot over board moves)
-        # Get board size from encoded state length
-        state_len = len(states[0])
-        board_size, num_moves = infer_board_size_from_state_len(state_len)
+        board_size, num_moves, _ = infer_board_info_from_state(states[0])
         
         policies_tensor = torch.zeros((len(batch), num_moves), dtype=torch.float32)
         
@@ -116,6 +224,7 @@ def iter_batches_from_files(file_paths, batch_size):
     """
     for path in file_paths:
         samples = load_training_data(path)
+        samples = augment_samples(samples)
         for batch in prepare_batch(samples, batch_size):
             yield batch
 
@@ -220,6 +329,7 @@ def train_network(data_path, board_size=9, hidden_size=128,
                 print(f"  - {path}")
     else:
         samples = load_training_data(data_path)
+        samples = augment_samples(samples)
         print(f"✓ Loaded {len(samples)} training samples")
     
     # Create network and optimizer
@@ -325,8 +435,7 @@ def evaluate_network(network, samples, board_size=9, num_samples=100):
     true_values = [s[2] for s in test_samples]
     true_policies = [s[1] for s in test_samples]
 
-    state_len = len(test_samples[0][0])
-    board_size_in_data, num_moves = infer_board_size_from_state_len(state_len)
+    board_size_in_data, num_moves, state_format = infer_board_info_from_state(test_samples[0][0])
     
     # Value accuracy
     value_errors = [abs(predicted_values[i] - true_values[i]) 
@@ -339,15 +448,28 @@ def evaluate_network(network, samples, board_size=9, num_samples=100):
         if true_policy:
             true_top_move = max(true_policy.items(), key=lambda x: x[1])[0]
             row, col = true_top_move
-            true_top_idx = row * board_size + col
+            true_top_idx = row * board_size_in_data + col
 
             state = test_samples[i][0]
-            black_plane = state[:num_moves]
-            white_plane = state[num_moves:num_moves * 2]
-            legal_mask = [
-                (black_plane[idx] == 0 and white_plane[idx] == 0)
-                for idx in range(num_moves)
-            ]
+            if state_format == "cnn_planes":
+                black_plane = state[0]
+                white_plane = state[1]
+                legal_mask = []
+                for r in range(board_size_in_data):
+                    for c in range(board_size_in_data):
+                        legal_mask.append(black_plane[r][c] == 0 and white_plane[r][c] == 0)
+            elif state_format == "matrix":
+                legal_mask = []
+                for r in range(board_size_in_data):
+                    for c in range(board_size_in_data):
+                        legal_mask.append(state[r][c] == 0)
+            else:
+                black_plane = state[:num_moves]
+                white_plane = state[num_moves:num_moves * 2]
+                legal_mask = [
+                    (black_plane[idx] == 0 and white_plane[idx] == 0)
+                    for idx in range(num_moves)
+                ]
 
             masked_logits = predicted_policies[i].copy()
             for idx, is_legal in enumerate(legal_mask):
@@ -373,6 +495,7 @@ def load_samples_for_evaluation(data_path, num_samples=200):
 
     if not using_manifest:
         samples = load_training_data(data_path)
+        samples = augment_samples(samples)
         return samples[:min(num_samples, len(samples))]
 
     chunk_files, _ = load_training_manifest(data_path)
@@ -380,6 +503,7 @@ def load_samples_for_evaluation(data_path, num_samples=200):
 
     for path in chunk_files:
         samples = load_training_data(path)
+        samples = augment_samples(samples)
         for sample in samples:
             collected.append(sample)
             if len(collected) >= num_samples:

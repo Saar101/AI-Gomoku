@@ -73,19 +73,27 @@ class Gomoku:
         new_game._status = self._status
         return new_game
 
-    def encode(self) -> List[int]:
-        """Encode state as 3 flattened planes: black, white, turn."""
-        black_plane: List[int] = []
-        white_plane: List[int] = []
+    def encode(self) -> List[List[List[int]]]:
+        """Encode state as CNN-ready 3 planes: black, white, turn."""
+        black_plane: List[List[int]] = []
+        white_plane: List[List[int]] = []
         turn_value = 1 if self.to_move == 1 else 0
-        turn_plane: List[int] = []
+        turn_plane: List[List[int]] = []
+
         for r in range(self.size):
+            black_row: List[int] = []
+            white_row: List[int] = []
+            turn_row: List[int] = []
             for c in range(self.size):
                 cell = self.board[r][c]
-                black_plane.append(1 if cell == 1 else 0)
-                white_plane.append(1 if cell == -1 else 0)
-                turn_plane.append(turn_value)
-        return black_plane + white_plane + turn_plane
+                black_row.append(1 if cell == 1 else 0)
+                white_row.append(1 if cell == -1 else 0)
+                turn_row.append(turn_value)
+            black_plane.append(black_row)
+            white_plane.append(white_row)
+            turn_plane.append(turn_row)
+
+        return [black_plane, white_plane, turn_plane]
 
     def decode(self, action_index: int) -> Move:
         """Translate an action index into a move in the game."""
